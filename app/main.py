@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes.insumos import router as insumos_router
 from app.routes.recepciones import router as recepciones_router
@@ -11,6 +12,14 @@ app = FastAPI(
     description="API para control de insumos, recepciones de stock y despachos con PDF y QR."
 )
 
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(insumos_router)
 app.include_router(recepciones_router)
@@ -25,5 +34,6 @@ def home():
             "insumos",
             "recepciones",
             "despachos"
-        ]
+        ],
+        "cors": "habilitado"
     }
