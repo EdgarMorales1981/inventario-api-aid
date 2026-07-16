@@ -1,0 +1,13 @@
+.env
+venv/
+__pycache__/
+*.pyc
+.idea/
+.pytest_cache/
+*.log
+app/routes/pedidos/
+app/routes/usuarios.py
+desktop/
+streamlit_dashboard.py
+test_api_smoke.py
+test_funcional_inventario.py
