@@ -6,3 +6,6 @@ pydantic
 qrcode[pil]
 reportlab
 requests
+streamlit
+pandas
+plotly
