@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timezone
+from html import escape
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
@@ -134,9 +135,12 @@ def pagina_validacion_html(
     detalle: str = "",
     valido: bool = True
 ):
+    titulo_seguro = escape(titulo)
+    mensaje_seguro = escape(mensaje)
+    detalle_seguro = escape(detalle)
+
     color = "#16a34a" if valido else "#dc2626"
     fondo = "#f0fdf4" if valido else "#fef2f2"
-    borde = "#bbf7d0" if valido else "#fecaca"
     icono = "✓" if valido else "!"
 
     return f"""
@@ -145,7 +149,7 @@ def pagina_validacion_html(
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Validación de Despacho</title>
+        <title>{titulo_seguro}</title>
 
         <style>
             * {{
@@ -158,123 +162,130 @@ def pagina_validacion_html(
                 font-family: Arial, Helvetica, sans-serif;
                 background: #f3f4f6;
                 color: #111827;
-            }}
-
-            .container {{
-                width: 100%;
-                max-width: 760px;
-                margin: 40px auto;
-                padding: 20px;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }}
 
             .card {{
+                width: 92%;
+                max-width: 520px;
                 background: #ffffff;
-                border-radius: 20px;
-                padding: 32px;
-                border: 1px solid #e5e7eb;
-                box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
-            }}
-
-            .top {{
-                display: flex;
-                align-items: center;
-                gap: 14px;
-                margin-bottom: 22px;
+                border-radius: 24px;
+                padding: 36px 28px;
+                text-align: center;
+                box-shadow: 0 12px 32px rgba(0, 0, 0, 0.10);
+                border-top: 8px solid {color};
             }}
 
             .icon {{
-                width: 48px;
-                height: 48px;
+                width: 90px;
+                height: 90px;
                 border-radius: 999px;
                 background: {fondo};
-                border: 1px solid {borde};
                 color: {color};
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                font-size: 26px;
+                font-size: 58px;
                 font-weight: bold;
-            }}
-
-            .badge {{
-                display: inline-block;
-                padding: 8px 14px;
-                border-radius: 999px;
-                background: {fondo};
-                border: 1px solid {borde};
-                color: {color};
-                font-weight: bold;
-                font-size: 14px;
+                margin: 0 auto 20px auto;
             }}
 
             h1 {{
+                margin: 0;
+                font-size: 36px;
                 color: {color};
-                margin: 0 0 12px 0;
-                font-size: 30px;
+                letter-spacing: 1px;
+                text-transform: uppercase;
             }}
 
             p {{
-                font-size: 16px;
-                line-height: 1.6;
-                margin: 0;
+                margin-top: 14px;
+                font-size: 18px;
+                color: #374151;
             }}
 
             .detalle {{
-                background: #f9fafb;
-                border-radius: 14px;
-                padding: 18px;
                 margin-top: 22px;
-                border: 1px solid #e5e7eb;
+                font-size: 14px;
+                color: #6b7280;
                 white-space: pre-line;
-                font-size: 15px;
-                line-height: 1.7;
+                line-height: 1.6;
             }}
 
             .footer {{
-                margin-top: 26px;
+                margin-top: 28px;
                 font-size: 13px;
-                color: #6b7280;
-                text-align: center;
-            }}
-
-            .warning {{
-                margin-top: 18px;
-                font-size: 13px;
-                color: #6b7280;
-                line-height: 1.5;
+                color: #9ca3af;
             }}
         </style>
     </head>
 
     <body>
-        <div class="container">
-            <div class="card">
-                <div class="top">
-                    <div class="icon">{icono}</div>
-                    <div>
-                        <div class="badge">Sistema de Inventario</div>
-                    </div>
-                </div>
-
-                <h1>{titulo}</h1>
-
-                <p>{mensaje}</p>
-
-                <div class="detalle">{detalle}</div>
-
-                <div class="warning">
-                    Esta validación confirma que el código QR existe en el sistema.
-                    Para más detalles administrativos, consulte al responsable del inventario.
-                </div>
-
-                <div class="footer">
-                    Aid For Life · Luchemos por la Vida
-                </div>
+        <div class="card">
+            <div class="icon">{icono}</div>
+            <h1>{titulo_seguro}</h1>
+            <p>{mensaje_seguro}</p>
+            <div class="detalle">{detalle_seguro}</div>
+            <div class="footer">
+                Aid For Life · Luchemos por la Vida
             </div>
         </div>
     </body>
     </html>
     """
+
+
+def generar_html_verificacion(qr_token: str):
+    response = (
+        supabase
+        .table("despachos")
+        .select("*")
+        .eq("qr_token", qr_token)
+        .execute()
+    )
+
+    if not response.data:
+        html = pagina_validacion_html(
+            titulo="No verificado",
+            mensaje="Este código QR no corresponde a un despacho registrado.",
+            detalle="Documento no válido.",
+            valido=False
+        )
+
+        return HTMLResponse(
+            content=html,
+            status_code=404
+        )
+
+    despacho = response.data[0]
+
+    if not despacho.get("qr_activo", False):
+        html = pagina_validacion_html(
+            titulo="No verificado",
+            mensaje="Este código QR está inactivo.",
+            detalle=f"Código: {despacho.get('codigo_despacho', 'N/A')}",
+            valido=False
+        )
+
+        return HTMLResponse(
+            content=html,
+            status_code=403
+        )
+
+    html = pagina_validacion_html(
+        titulo="Verificado",
+        mensaje="Documento auténtico.",
+        detalle=f"Código: {despacho.get('codigo_despacho', 'N/A')}",
+        valido=True
+    )
+
+    return HTMLResponse(
+        content=html,
+        status_code=200
+    )
 
 
 # =====================================================
@@ -467,124 +478,37 @@ def obtener_despacho_por_codigo(codigo_despacho: str):
 
 
 # =====================================================
-# VALIDACIÓN QR JSON
+# VALIDACIÓN QR VISUAL
 # =====================================================
 
-@router.get("/verificar-qr/{qr_token}")
+@router.get("/verificar-qr/{qr_token}", response_class=HTMLResponse)
 def verificar_qr_despacho(qr_token: str):
     try:
-        response = (
-            supabase
-            .table("despachos")
-            .select("*")
-            .eq("qr_token", qr_token)
-            .execute()
-        )
-
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="QR no válido"
-            )
-
-        despacho = response.data[0]
-
-        if not despacho.get("qr_activo", False):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="QR inactivo"
-            )
-
-        despacho["items"] = obtener_items_despacho(despacho["id"])
-
-        return {
-            "mensaje": "QR válido. Despacho auténtico.",
-            "despacho": despacho
-        }
-
-    except HTTPException:
-        raise
+        return generar_html_verificacion(qr_token)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
-
-
-# =====================================================
-# VALIDACIÓN QR VISUAL PARA EL PDF
-# =====================================================
-
-@router.get("/validar/{qr_token}", response_class=HTMLResponse)
-def validar_autenticidad_despacho(qr_token: str):
-    try:
-        response = (
-            supabase
-            .table("despachos")
-            .select("*")
-            .eq("qr_token", qr_token)
-            .execute()
-        )
-
-        if not response.data:
-            html = pagina_validacion_html(
-                titulo="QR inválido",
-                mensaje="Este código QR no corresponde a ningún despacho registrado.",
-                detalle="El documento no pudo ser validado en el sistema.",
-                valido=False
-            )
-
-            return HTMLResponse(
-                content=html,
-                status_code=404
-            )
-
-        despacho = response.data[0]
-
-        if not despacho.get("qr_activo", False):
-            html = pagina_validacion_html(
-                titulo="QR inactivo",
-                mensaje="Este despacho existe, pero su código QR ya no está activo.",
-                detalle=(
-                    f"Código de despacho: {despacho.get('codigo_despacho', 'N/A')}\n"
-                    f"Status: {despacho.get('status', 'N/A')}"
-                ),
-                valido=False
-            )
-
-            return HTMLResponse(
-                content=html,
-                status_code=403
-            )
-
-        items = obtener_items_despacho(despacho["id"])
-
-        detalle = (
-            f"Código de despacho: {despacho.get('codigo_despacho', 'N/A')}\n"
-            f"Status: {despacho.get('status', 'N/A')}\n"
-            f"Fecha: {despacho.get('fecha_despacho', 'N/A')}\n"
-            f"Entregado a: {despacho.get('entregado_a') or 'N/A'}\n"
-            f"Despachado por: {despacho.get('despachado_por') or 'N/A'}\n"
-            f"Cantidad de ítems: {len(items)}"
-        )
-
         html = pagina_validacion_html(
-            titulo="Despacho auténtico",
-            mensaje="Este documento fue generado por el sistema oficial de inventario.",
-            detalle=detalle,
-            valido=True
+            titulo="No verificado",
+            mensaje="No se pudo validar el documento.",
+            detalle=str(e),
+            valido=False
         )
 
         return HTMLResponse(
             content=html,
-            status_code=200
+            status_code=500
         )
+
+
+@router.get("/validar/{qr_token}", response_class=HTMLResponse)
+def validar_autenticidad_despacho(qr_token: str):
+    try:
+        return generar_html_verificacion(qr_token)
 
     except Exception as e:
         html = pagina_validacion_html(
-            titulo="Error de validación",
-            mensaje="No se pudo validar el despacho en este momento.",
+            titulo="No verificado",
+            mensaje="No se pudo validar el documento.",
             detalle=str(e),
             valido=False
         )
