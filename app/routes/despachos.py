@@ -3,10 +3,10 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 
 from app.database import supabase
-from app.models import DespachoCreate, DespachoUpdate
+from app.models import DespachoCreate
 from app.services.qr_service import generar_qr_bytes
 from app.services.pdf_service import generar_pdf_despacho
 
@@ -17,8 +17,15 @@ router = APIRouter(
 )
 
 
-APP_PUBLIC_URL = os.getenv("APP_PUBLIC_URL", "http://127.0.0.1:8000")
+APP_PUBLIC_URL = os.getenv(
+    "APP_PUBLIC_URL",
+    "http://127.0.0.1:8000"
+).rstrip("/")
 
+
+# =====================================================
+# FUNCIONES AUXILIARES
+# =====================================================
 
 def generar_codigo_despacho() -> str:
     fecha = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -48,9 +55,7 @@ def actualizar_stock_insumo(insumo_id: int, nueva_cantidad: float):
     response = (
         supabase
         .table("insumos")
-        .update({
-            "cantidad": nueva_cantidad
-        })
+        .update({"cantidad": nueva_cantidad})
         .eq("id", insumo_id)
         .select("*")
         .execute()
@@ -93,7 +98,7 @@ def obtener_items_despacho(despacho_id: int):
         .execute()
     )
 
-    return response.data
+    return response.data or []
 
 
 def normalizar_items(items):
@@ -123,6 +128,159 @@ def normalizar_items(items):
     ]
 
 
+def pagina_validacion_html(
+    titulo: str,
+    mensaje: str,
+    detalle: str = "",
+    valido: bool = True
+):
+    color = "#16a34a" if valido else "#dc2626"
+    fondo = "#f0fdf4" if valido else "#fef2f2"
+    borde = "#bbf7d0" if valido else "#fecaca"
+    icono = "✓" if valido else "!"
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Validación de Despacho</title>
+
+        <style>
+            * {{
+                box-sizing: border-box;
+            }}
+
+            body {{
+                margin: 0;
+                padding: 0;
+                font-family: Arial, Helvetica, sans-serif;
+                background: #f3f4f6;
+                color: #111827;
+            }}
+
+            .container {{
+                width: 100%;
+                max-width: 760px;
+                margin: 40px auto;
+                padding: 20px;
+            }}
+
+            .card {{
+                background: #ffffff;
+                border-radius: 20px;
+                padding: 32px;
+                border: 1px solid #e5e7eb;
+                box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+            }}
+
+            .top {{
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                margin-bottom: 22px;
+            }}
+
+            .icon {{
+                width: 48px;
+                height: 48px;
+                border-radius: 999px;
+                background: {fondo};
+                border: 1px solid {borde};
+                color: {color};
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 26px;
+                font-weight: bold;
+            }}
+
+            .badge {{
+                display: inline-block;
+                padding: 8px 14px;
+                border-radius: 999px;
+                background: {fondo};
+                border: 1px solid {borde};
+                color: {color};
+                font-weight: bold;
+                font-size: 14px;
+            }}
+
+            h1 {{
+                color: {color};
+                margin: 0 0 12px 0;
+                font-size: 30px;
+            }}
+
+            p {{
+                font-size: 16px;
+                line-height: 1.6;
+                margin: 0;
+            }}
+
+            .detalle {{
+                background: #f9fafb;
+                border-radius: 14px;
+                padding: 18px;
+                margin-top: 22px;
+                border: 1px solid #e5e7eb;
+                white-space: pre-line;
+                font-size: 15px;
+                line-height: 1.7;
+            }}
+
+            .footer {{
+                margin-top: 26px;
+                font-size: 13px;
+                color: #6b7280;
+                text-align: center;
+            }}
+
+            .warning {{
+                margin-top: 18px;
+                font-size: 13px;
+                color: #6b7280;
+                line-height: 1.5;
+            }}
+        </style>
+    </head>
+
+    <body>
+        <div class="container">
+            <div class="card">
+                <div class="top">
+                    <div class="icon">{icono}</div>
+                    <div>
+                        <div class="badge">Sistema de Inventario</div>
+                    </div>
+                </div>
+
+                <h1>{titulo}</h1>
+
+                <p>{mensaje}</p>
+
+                <div class="detalle">{detalle}</div>
+
+                <div class="warning">
+                    Esta validación confirma que el código QR existe en el sistema.
+                    Para más detalles administrativos, consulte al responsable del inventario.
+                </div>
+
+                <div class="footer">
+                    Aid For Life · Luchemos por la Vida
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+# =====================================================
+# CREAR DESPACHO
+# =====================================================
+
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def crear_despacho(despacho: DespachoCreate):
     try:
@@ -133,16 +291,13 @@ def crear_despacho(despacho: DespachoCreate):
             )
 
         items_normalizados = normalizar_items(despacho.items)
-
         items_preparados = []
 
-        # 1. Validar stock antes de guardar
         for item in items_normalizados:
             insumo_id = item["insumo_id"]
             cantidad_despachar = float(item["cantidad"])
 
             insumo = buscar_insumo(insumo_id)
-
             stock_actual = float(insumo.get("cantidad") or 0)
 
             if cantidad_despachar > stock_actual:
@@ -164,7 +319,6 @@ def crear_despacho(despacho: DespachoCreate):
                 "stock_nuevo": stock_nuevo
             })
 
-        # 2. Crear despacho principal
         codigo_despacho = generar_codigo_despacho()
 
         despacho_payload = {
@@ -192,7 +346,6 @@ def crear_despacho(despacho: DespachoCreate):
         despacho_creado = despacho_response.data[0]
         despacho_id = despacho_creado["id"]
 
-        # 3. Crear ítems del despacho
         items_payload = []
 
         for item in items_preparados:
@@ -226,7 +379,6 @@ def crear_despacho(despacho: DespachoCreate):
                 detail="No se pudieron crear los ítems del despacho"
             )
 
-        # 4. Restar stock en insumos
         for item in items_preparados:
             actualizar_stock_insumo(
                 insumo_id=item["insumo_id"],
@@ -244,8 +396,15 @@ def crear_despacho(despacho: DespachoCreate):
         raise
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
+
+# =====================================================
+# LISTADOS Y CONSULTAS
+# =====================================================
 
 @router.get("/")
 def listar_despachos():
@@ -258,7 +417,7 @@ def listar_despachos():
             .execute()
         )
 
-        despachos = response.data
+        despachos = response.data or []
 
         for despacho in despachos:
             despacho["items"] = obtener_items_despacho(despacho["id"])
@@ -269,7 +428,10 @@ def listar_despachos():
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 
 @router.get("/codigo/{codigo_despacho}")
@@ -298,8 +460,15 @@ def obtener_despacho_por_codigo(codigo_despacho: str):
         raise
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
+
+# =====================================================
+# VALIDACIÓN QR JSON
+# =====================================================
 
 @router.get("/verificar-qr/{qr_token}")
 def verificar_qr_despacho(qr_token: str):
@@ -337,8 +506,98 @@ def verificar_qr_despacho(qr_token: str):
         raise
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
+
+# =====================================================
+# VALIDACIÓN QR VISUAL PARA EL PDF
+# =====================================================
+
+@router.get("/validar/{qr_token}", response_class=HTMLResponse)
+def validar_autenticidad_despacho(qr_token: str):
+    try:
+        response = (
+            supabase
+            .table("despachos")
+            .select("*")
+            .eq("qr_token", qr_token)
+            .execute()
+        )
+
+        if not response.data:
+            html = pagina_validacion_html(
+                titulo="QR inválido",
+                mensaje="Este código QR no corresponde a ningún despacho registrado.",
+                detalle="El documento no pudo ser validado en el sistema.",
+                valido=False
+            )
+
+            return HTMLResponse(
+                content=html,
+                status_code=404
+            )
+
+        despacho = response.data[0]
+
+        if not despacho.get("qr_activo", False):
+            html = pagina_validacion_html(
+                titulo="QR inactivo",
+                mensaje="Este despacho existe, pero su código QR ya no está activo.",
+                detalle=(
+                    f"Código de despacho: {despacho.get('codigo_despacho', 'N/A')}\n"
+                    f"Status: {despacho.get('status', 'N/A')}"
+                ),
+                valido=False
+            )
+
+            return HTMLResponse(
+                content=html,
+                status_code=403
+            )
+
+        items = obtener_items_despacho(despacho["id"])
+
+        detalle = (
+            f"Código de despacho: {despacho.get('codigo_despacho', 'N/A')}\n"
+            f"Status: {despacho.get('status', 'N/A')}\n"
+            f"Fecha: {despacho.get('fecha_despacho', 'N/A')}\n"
+            f"Entregado a: {despacho.get('entregado_a') or 'N/A'}\n"
+            f"Despachado por: {despacho.get('despachado_por') or 'N/A'}\n"
+            f"Cantidad de ítems: {len(items)}"
+        )
+
+        html = pagina_validacion_html(
+            titulo="Despacho auténtico",
+            mensaje="Este documento fue generado por el sistema oficial de inventario.",
+            detalle=detalle,
+            valido=True
+        )
+
+        return HTMLResponse(
+            content=html,
+            status_code=200
+        )
+
+    except Exception as e:
+        html = pagina_validacion_html(
+            titulo="Error de validación",
+            mensaje="No se pudo validar el despacho en este momento.",
+            detalle=str(e),
+            valido=False
+        )
+
+        return HTMLResponse(
+            content=html,
+            status_code=500
+        )
+
+
+# =====================================================
+# CONSULTAS POR ID
+# =====================================================
 
 @router.get("/{despacho_id}")
 def obtener_despacho(despacho_id: int):
@@ -352,14 +611,16 @@ def obtener_despacho(despacho_id: int):
         raise
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 
 @router.get("/{despacho_id}/items")
 def listar_items_despacho(despacho_id: int):
     try:
         obtener_despacho_por_id(despacho_id)
-
         items = obtener_items_despacho(despacho_id)
 
         return {
@@ -371,15 +632,22 @@ def listar_items_despacho(despacho_id: int):
         raise
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
+
+# =====================================================
+# QR Y PDF
+# =====================================================
 
 @router.get("/{despacho_id}/qr")
 def generar_qr_despacho(despacho_id: int):
     try:
         despacho = obtener_despacho_por_id(despacho_id)
 
-        qr_url = f"{APP_PUBLIC_URL}/despachos/verificar-qr/{despacho['qr_token']}"
+        qr_url = f"{APP_PUBLIC_URL}/despachos/validar/{despacho['qr_token']}"
 
         qr_buffer = generar_qr_bytes(qr_url)
 
@@ -395,7 +663,10 @@ def generar_qr_despacho(despacho_id: int):
         raise
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 
 @router.get("/{despacho_id}/pdf")
@@ -404,7 +675,7 @@ def generar_pdf_despacho_endpoint(despacho_id: int):
         despacho = obtener_despacho_por_id(despacho_id)
         items = obtener_items_despacho(despacho_id)
 
-        qr_url = f"{APP_PUBLIC_URL}/despachos/verificar-qr/{despacho['qr_token']}"
+        qr_url = f"{APP_PUBLIC_URL}/despachos/validar/{despacho['qr_token']}"
 
         pdf_buffer = generar_pdf_despacho(
             despacho=despacho,
@@ -424,8 +695,15 @@ def generar_pdf_despacho_endpoint(despacho_id: int):
         raise
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
+
+# =====================================================
+# CANCELAR DESPACHO
+# =====================================================
 
 @router.put("/{despacho_id}/cancelar")
 def cancelar_despacho(despacho_id: int):
@@ -440,7 +718,6 @@ def cancelar_despacho(despacho_id: int):
 
         items = obtener_items_despacho(despacho_id)
 
-        # Devolver stock de cada ítem
         for item in items:
             insumo = buscar_insumo(item["insumo_id"])
 
@@ -481,4 +758,7 @@ def cancelar_despacho(despacho_id: int):
         raise
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
